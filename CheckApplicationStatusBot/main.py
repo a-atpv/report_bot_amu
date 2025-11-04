@@ -1,6 +1,8 @@
 import os
 import logging
 import sys
+import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -30,6 +32,14 @@ if not BOT_TOKEN:
     )
 
 ticket_service = get_ticket_service()
+ANNOUNCE_CHAT_ID_RAW = os.getenv("ANNOUNCE_CHAT_ID")
+ANNOUNCE_CHAT_ID = int(ANNOUNCE_CHAT_ID_RAW) if ANNOUNCE_CHAT_ID_RAW else None
+try:
+    ASTANA_TZ = ZoneInfo("Asia/Almaty")  # Astana time zone
+except Exception:
+    ASTANA_TZ = datetime.timezone.utc
+    logger = logging.getLogger(__name__)
+    logger.warning("Falling back to UTC timezone; could not load Asia/Almaty")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -58,42 +68,36 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Bot is running! ✅")
 
 
+def compose_new_tickets_summary() -> str:
+    global ticket_service
+    if ticket_service is None:
+        ticket_service = get_ticket_service()
+    rows = ticket_service.fetch_tickets_by_status(
+        status="new", department_id=33, limit=1000, offset=0
+    )
+    if not rows:
+        return "на данный момент есть 0 новых запросов."
+    total_count = len(rows)
+    per_building: dict[str, int] = {}
+    for row in rows:
+        building_key = row.get("building_id") if isinstance(row, dict) else None
+        if building_key is None:
+            building_key = "не указан"
+        building_key = str(building_key)
+        per_building[building_key] = per_building.get(building_key, 0) + 1
+    id_to_description = ticket_service.fetch_building_descriptions()
+    lines = [f"на данный момент есть {total_count} новых запросов."]
+    for b in sorted(per_building.keys()):
+        readable = id_to_description.get(b, b)
+        lines.append(f"в корпусе {readable}  {per_building[b]} новых запросов")
+    return "\n\n".join(lines)
+
+
 async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return summary of NEW tickets and counts per building."""
     try:
-        global ticket_service
-        if ticket_service is None:
-            ticket_service = get_ticket_service()
-        # Fetch only NEW tickets for department 33
-        rows = ticket_service.fetch_tickets_by_status(
-            status="new", department_id=33, limit=1000, offset=0
-        )
-
-        if not rows:
-            await update.message.reply_text("на данный момент есть 0 новых запросов.")
-            return
-
-        total_count = len(rows)
-
-        # Group by building id/name
-        per_building: dict[str, int] = {}
-        for row in rows:
-            building_key = row.get("building_id") if isinstance(row, dict) else None
-            if building_key is None:
-                building_key = "не указан"
-            building_key = str(building_key)
-            per_building[building_key] = per_building.get(building_key, 0) + 1
-
-        # Map building ids to human-readable descriptions from cat_building
-        id_to_description = ticket_service.fetch_building_descriptions()
-
-        # Build message
-        lines = [f"на данный момент есть {total_count} новых запросов."]
-        for b in sorted(per_building.keys()):
-            readable = id_to_description.get(b, b)
-            lines.append(f"в корпусе {readable}  {per_building[b]} новых запросов")
-
-        await update.message.reply_text("\n\n".join(lines))
+        text = compose_new_tickets_summary()
+        await update.message.reply_text(text)
     except Exception as e:
         logger.error(f"/tickets failed: {e}")
         await update.message.reply_text(
@@ -127,6 +131,30 @@ def main() -> None:
 
     # Echo handler - responds to all text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # Schedule daily announcements of new tickets (Astana time)
+    async def send_new_tickets_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            if ANNOUNCE_CHAT_ID is None:
+                logger.warning("ANNOUNCE_CHAT_ID is not set; skipping scheduled send.")
+                return
+            text = compose_new_tickets_summary()
+            await context.bot.send_message(chat_id=ANNOUNCE_CHAT_ID, text=text)
+        except Exception as e:
+            logger.error(f"Scheduled send failed: {e}")
+
+    times = [
+        datetime.time(8, 30, tzinfo=ASTANA_TZ),
+        datetime.time(12, 0, tzinfo=ASTANA_TZ),
+        datetime.time(15, 0, tzinfo=ASTANA_TZ),
+        datetime.time(17, 25, tzinfo=ASTANA_TZ),
+    ]
+    for idx, t in enumerate(times):
+        application.job_queue.run_daily(
+            send_new_tickets_job,
+            time=t,
+            name=f"send_new_tickets_{idx}",
+        )
 
     # Start the bot with error handling
     logger.info("Bot is starting...")
