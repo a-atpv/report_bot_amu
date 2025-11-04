@@ -58,7 +58,7 @@ Available commands:
 /start - Start the bot
 /help - Show this help message
 /status - Check status
-/tickets - List all tickets from DB_TICKETS
+/tickets - Выжимка по новым заявкам (как в расписании)
     """
     await update.message.reply_text(help_text)
 
@@ -150,15 +150,20 @@ def main() -> None:
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(16, 42, tzinfo=ASTANA_TZ),
+        datetime.time(17, 7, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
-    for idx, t in enumerate(times):
-        application.job_queue.run_daily(
-            send_new_tickets_job,
-            time=t,
-            name=f"send_new_tickets_{idx}",
+    if application.job_queue is None:
+        logger.warning(
+            "JobQueue is not available. Install PTB with job-queue extra or APScheduler to enable scheduled jobs."
         )
+    else:
+        for idx, t in enumerate(times):
+            application.job_queue.run_daily(
+                send_new_tickets_job,
+                time=t,
+                name=f"send_new_tickets_{idx}",
+            )
 
     # Start the bot with error handling
     logger.info("Bot is starting...")
