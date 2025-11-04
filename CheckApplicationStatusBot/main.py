@@ -150,7 +150,7 @@ def main() -> None:
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(17, 7, tzinfo=ASTANA_TZ),
+        datetime.time(17, 10, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
     if application.job_queue is None:
