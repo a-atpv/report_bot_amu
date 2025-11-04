@@ -70,7 +70,7 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         max_message_len = 4000
 
         while True:
-            rows = ticket_service.fetch_all_tickets(limit=limit, offset=offset)
+            rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
             if not rows:
                 break
 
