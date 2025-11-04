@@ -37,9 +37,10 @@ ANNOUNCE_CHAT_ID = int(ANNOUNCE_CHAT_ID_RAW) if ANNOUNCE_CHAT_ID_RAW else None
 try:
     ASTANA_TZ = ZoneInfo("Asia/Almaty")  # Astana time zone
 except Exception:
-    ASTANA_TZ = datetime.timezone.utc
+    # Fallback to fixed UTC+6 (Almaty/Astana) instead of UTC to keep local schedule
+    ASTANA_TZ = datetime.timezone(datetime.timedelta(hours=6), name="UTC+06")
     logger = logging.getLogger(__name__)
-    logger.warning("Falling back to UTC timezone; could not load Asia/Almaty")
+    logger.warning("Falling back to fixed UTC+06 timezone; could not load Asia/Almaty")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -141,6 +142,10 @@ def main() -> None:
             if ANNOUNCE_CHAT_ID is None:
                 logger.warning("ANNOUNCE_CHAT_ID is not set; skipping scheduled send.")
                 return
+            now_astana = datetime.datetime.now(ASTANA_TZ).strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
+            logger.info(f"Executing scheduled send at {now_astana}")
             text = compose_new_tickets_summary()
             await context.bot.send_message(chat_id=ANNOUNCE_CHAT_ID, text=text)
         except Exception as e:
@@ -150,7 +155,7 @@ def main() -> None:
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(17, 10, tzinfo=ASTANA_TZ),
+        datetime.time(17, 15, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
     if application.job_queue is None:
@@ -159,6 +164,9 @@ def main() -> None:
         )
     else:
         for idx, t in enumerate(times):
+            logger.info(
+                f"Scheduling job send_new_tickets_{idx} for {t.strftime('%H:%M')} {t.tzname()}"
+            )
             application.job_queue.run_daily(
                 send_new_tickets_job,
                 time=t,
