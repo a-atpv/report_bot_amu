@@ -69,31 +69,31 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         total_rows = 0
         max_message_len = 4000
 
-        while True:
-            rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
-            if not rows:
-                break
+        # while True:
+            # rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
+            # if not rows:
+            #     break
 
-            total_rows += len(rows)
+            # total_rows += len(rows)
 
-            # Build message chunks under Telegram's message size limit
-            current_chunk = ""
-            for row in rows:
-                line = str(row)
-                if len(current_chunk) + len(line) + 1 > max_message_len:
-                    await update.message.reply_text(current_chunk)
-                    current_chunk = ""
-                current_chunk += ("\n" if current_chunk else "") + line
+            # # Build message chunks under Telegram's message size limit
+            # current_chunk = ""
+            # for row in rows:
+            #     line = str(row)
+            #     if len(current_chunk) + len(line) + 1 > max_message_len:
+            #         await update.message.reply_text(current_chunk)
+            #         current_chunk = ""
+            #     current_chunk += ("\n" if current_chunk else "") + line
 
-            if current_chunk:
-                await update.message.reply_text(current_chunk)
+            # if current_chunk:
+            #     await update.message.reply_text(current_chunk)
 
-            offset += limit
-
-        if total_rows == 0:
+            # offset += limit
+        rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
+        if rows == None:
             await update.message.reply_text("No tickets found.")
         else:
-            await update.message.reply_text(f"Total tickets: {total_rows}")
+            await update.message.reply_text(f"Total tickets: {rows}")
     except Exception as e:
         logger.error(f"/tickets failed: {e}")
         await update.message.reply_text(
