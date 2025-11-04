@@ -150,7 +150,7 @@ def main() -> None:
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(16, 40, tzinfo=ASTANA_TZ),
+        datetime.time(16, 42, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
     for idx, t in enumerate(times):
