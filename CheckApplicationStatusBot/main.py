@@ -86,10 +86,13 @@ def compose_new_tickets_summary() -> str:
         building_key = str(building_key)
         per_building[building_key] = per_building.get(building_key, 0) + 1
     id_to_description = ticket_service.fetch_building_descriptions()
-    lines = [f"на данный момент есть {total_count} новых запросов."]
+    lines = [
+        f"📊 На данный момент: {total_count} новых запросов",
+        "🏢 Распределение по корпусам:",
+    ]
     for b in sorted(per_building.keys()):
         readable = id_to_description.get(b, b)
-        lines.append(f"в корпусе {readable}  {per_building[b]} новых запросов")
+        lines.append(f"• корпус {readable}: {per_building[b]} 📨")
     return "\n\n".join(lines)
 
 
