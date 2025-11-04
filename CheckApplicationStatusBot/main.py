@@ -11,6 +11,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.error import TimedOut, NetworkError
+from services.db_service import get_ticket_service
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,6 +28,8 @@ if not BOT_TOKEN:
     raise ValueError(
         "BOT_TOKEN not found in environment variables. Please check your .env file."
     )
+
+ticket_service = get_ticket_service()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -45,6 +48,7 @@ Available commands:
 /start - Start the bot
 /help - Show this help message
 /status - Check status
+/tickets - List all tickets from DB_TICKETS
     """
     await update.message.reply_text(help_text)
 
@@ -52,6 +56,49 @@ Available commands:
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send status information."""
     await update.message.reply_text("Bot is running! ✅")
+
+
+async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return all rows from DB_TICKETS in chunks to respect Telegram limits."""
+    try:
+        global ticket_service
+        if ticket_service is None:
+            ticket_service = get_ticket_service()
+        limit = 500
+        offset = 0
+        total_rows = 0
+        max_message_len = 4000
+
+        while True:
+            rows = ticket_service.fetch_all_tickets(limit=limit, offset=offset)
+            if not rows:
+                break
+
+            total_rows += len(rows)
+
+            # Build message chunks under Telegram's message size limit
+            current_chunk = ""
+            for row in rows:
+                line = str(row)
+                if len(current_chunk) + len(line) + 1 > max_message_len:
+                    await update.message.reply_text(current_chunk)
+                    current_chunk = ""
+                current_chunk += ("\n" if current_chunk else "") + line
+
+            if current_chunk:
+                await update.message.reply_text(current_chunk)
+
+            offset += limit
+
+        if total_rows == 0:
+            await update.message.reply_text("No tickets found.")
+        else:
+            await update.message.reply_text(f"Total tickets: {total_rows}")
+    except Exception as e:
+        logger.error(f"/tickets failed: {e}")
+        await update.message.reply_text(
+            "Failed to fetch tickets. Please try again later."
+        )
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -76,6 +123,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("tickets", tickets))
 
     # Echo handler - responds to all text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
@@ -88,7 +136,7 @@ def main() -> None:
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Connection timeout/error: {e}")
-  
+
         sys.exit(1)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
