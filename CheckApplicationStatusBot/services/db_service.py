@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from dotenv import load_dotenv
 from mysql.connector import connect
@@ -70,10 +70,17 @@ class MySQLTicketService:
         return rows[0] if rows else None
 
     def fetch_tickets_by_status(
-        self, status: str, limit: int = 100, offset: int = 0
+        self,
+        status: str = "new",
+        department_id: int = 33,
+        limit: int = 100,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
-        query = f"SELECT * FROM {self.tickets_table} WHERE `status` = 'new' && department_id = 33"
-        params: Tuple[Any, int, int] = (status, limit, offset)
+        query = (
+            f"SELECT * FROM {self.tickets_table} WHERE `status` = %s AND department_id = %s"
+            " ORDER BY id DESC LIMIT %s OFFSET %s"
+        )
+        params: Tuple[Any, ...] = (status, department_id, limit, offset)
         return self._execute_query(query, params)
 
     def _execute_query(

@@ -59,41 +59,37 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Return all rows from DB_TICKETS in chunks to respect Telegram limits."""
+    """Return summary of NEW tickets and counts per building."""
     try:
         global ticket_service
         if ticket_service is None:
             ticket_service = get_ticket_service()
-        limit = 500
-        offset = 0
-        total_rows = 0
-        max_message_len = 4000
+        # Fetch only NEW tickets for department 33
+        rows = ticket_service.fetch_tickets_by_status(
+            status="new", department_id=33, limit=1000, offset=0
+        )
 
-        # while True:
-            # rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
-            # if not rows:
-            #     break
+        if not rows:
+            await update.message.reply_text("на данный момент есть 0 новых запросов.")
+            return
 
-            # total_rows += len(rows)
+        total_count = len(rows)
 
-            # # Build message chunks under Telegram's message size limit
-            # current_chunk = ""
-            # for row in rows:
-            #     line = str(row)
-            #     if len(current_chunk) + len(line) + 1 > max_message_len:
-            #         await update.message.reply_text(current_chunk)
-            #         current_chunk = ""
-            #     current_chunk += ("\n" if current_chunk else "") + line
+        # Group by building id/name
+        per_building: dict[str, int] = {}
+        for row in rows:
+            building_key = row.get("building_id") if isinstance(row, dict) else None
+            if building_key is None:
+                building_key = "не указан"
+            building_key = str(building_key)
+            per_building[building_key] = per_building.get(building_key, 0) + 1
 
-            # if current_chunk:
-            #     await update.message.reply_text(current_chunk)
+        # Build message
+        lines = [f"на данный момент есть {total_count} новых запросов."]
+        for b in sorted(per_building.keys()):
+            lines.append(f"в корпусе {b}  {per_building[b]} новых запросов")
 
-            # offset += limit
-        rows = ticket_service.fetch_tickets_by_status(limit=limit, offset=offset)
-        if rows == None:
-            await update.message.reply_text("No tickets found.")
-        else:
-            await update.message.reply_text(f"Total tickets: {rows}")
+        await update.message.reply_text("\n\n".join(lines))
     except Exception as e:
         logger.error(f"/tickets failed: {e}")
         await update.message.reply_text(
