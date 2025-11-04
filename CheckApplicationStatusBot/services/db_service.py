@@ -31,11 +31,16 @@ class MySQLTicketService:
         self.db_password: str = os.getenv("DB_PASSWORD", "")
         self.db_name: str = os.getenv("DB_NAME", "")
         self.tickets_table: str = os.getenv("TICKETS_TABLE_NAME", "DB_TICKETS")
+        self.buildings_table: str = os.getenv("BUILDINGS_TABLE_NAME", "cat_building")
 
         # Basic validation to avoid unsafe identifiers
         if not self._is_safe_identifier(self.tickets_table):
             raise ValueError(
                 "TICKETS_TABLE_NAME contains invalid characters. Allowed: letters, digits, underscore."
+            )
+        if not self._is_safe_identifier(self.buildings_table):
+            raise ValueError(
+                "BUILDINGS_TABLE_NAME contains invalid characters. Allowed: letters, digits, underscore."
             )
 
         if not self.db_name:
@@ -63,6 +68,22 @@ class MySQLTicketService:
         )
         params: Tuple[int, int] = (limit, offset)
         return self._execute_query(query, params)
+
+    def fetch_building_descriptions(self) -> Dict[str, str]:
+        """
+        Return mapping of building id (as string) -> description from cat_building table.
+        If description is NULL or empty, falls back to building name or id string.
+        """
+        query = f"SELECT id, description, name FROM {self.buildings_table}"
+        rows = self._execute_query(query, tuple())
+        id_to_desc: Dict[str, str] = {}
+        for row in rows:
+            bid = row.get("id")
+            # Prefer description, then name, then id string
+            desc = row.get("description") or row.get("name")
+            if bid is not None:
+                id_to_desc[str(bid)] = str(desc) if desc is not None else str(bid)
+        return id_to_desc
 
     def fetch_ticket_by_id(self, ticket_id: Any) -> Optional[Dict[str, Any]]:
         query = f"SELECT * FROM {self.tickets_table} WHERE id = %s"

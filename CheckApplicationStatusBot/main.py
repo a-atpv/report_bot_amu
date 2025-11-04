@@ -84,10 +84,14 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             building_key = str(building_key)
             per_building[building_key] = per_building.get(building_key, 0) + 1
 
+        # Map building ids to human-readable descriptions from cat_building
+        id_to_description = ticket_service.fetch_building_descriptions()
+
         # Build message
         lines = [f"на данный момент есть {total_count} новых запросов."]
         for b in sorted(per_building.keys()):
-            lines.append(f"в корпусе {b}  {per_building[b]} новых запросов")
+            readable = id_to_description.get(b, b)
+            lines.append(f"в корпусе {readable}  {per_building[b]} новых запросов")
 
         await update.message.reply_text("\n\n".join(lines))
     except Exception as e:
