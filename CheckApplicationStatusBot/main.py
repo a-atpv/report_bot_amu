@@ -131,27 +131,81 @@ def compose_new_tickets_summary() -> str:
     global ticket_service
     if ticket_service is None:
         ticket_service = get_ticket_service()
-    rows = ticket_service.fetch_tickets_by_status(
+
+    # Fetch new tickets
+    new_rows = ticket_service.fetch_tickets_by_status(
         status="new", department_id=33, limit=1000, offset=0
     )
-    if not rows:
-        return "на данный момент есть 0 новых запросов."
-    total_count = len(rows)
-    per_building: dict[str, int] = {}
-    for row in rows:
-        building_key = row.get("building_id") if isinstance(row, dict) else None
-        if building_key is None:
-            building_key = "не указан"
-        building_key = str(building_key)
-        per_building[building_key] = per_building.get(building_key, 0) + 1
-    id_to_description = ticket_service.fetch_building_descriptions()
-    lines = [
-        f"📊 На данный момент: {total_count} новых запросов",
-        "🏢 Распределение по корпусам:",
-    ]
-    for b in sorted(per_building.keys()):
-        readable = id_to_description.get(b, b)
-        lines.append(f"• корпус {readable}: {per_building[b]} 📨")
+
+    # Fetch taken tickets
+    taken_rows = ticket_service.fetch_tickets_by_status(
+        status="taken", department_id=33, limit=1000, offset=0
+    )
+
+    lines = []
+
+    # New tickets section
+    if not new_rows:
+        lines.append("📊 Новых заявок: 0")
+    else:
+        total_count = len(new_rows)
+        per_building: dict[str, int] = {}
+        for row in new_rows:
+            building_key = row.get("building_id") if isinstance(row, dict) else None
+            if building_key is None:
+                building_key = "не указан"
+            building_key = str(building_key)
+            per_building[building_key] = per_building.get(building_key, 0) + 1
+        id_to_description = ticket_service.fetch_building_descriptions()
+        lines.append(f"📊 Новых заявок: {total_count}")
+        lines.append("🏢 новых заявок по адресам:")
+        for b in sorted(per_building.keys()):
+            readable = id_to_description.get(b, b)
+            lines.append(f"• корпус {readable}: {per_building[b]} 📨")
+
+    # Taken tickets section
+    if taken_rows:
+        lines.append("-------------------------------")
+        lines.append("заявок в работе:")
+
+        # Group taken tickets by specialist_id and building_id
+        per_specialist_building: dict[tuple, int] = {}
+        specialist_ids = set()
+
+        for row in taken_rows:
+            specialist_id = row.get("specialist_id")
+            building_id = row.get("building_id")
+
+            if specialist_id is None:
+                continue
+
+            specialist_ids.add(specialist_id)
+            building_key = building_id if building_id is not None else "не указан"
+            key = (specialist_id, building_key)
+            per_specialist_building[key] = per_specialist_building.get(key, 0) + 1
+
+        # Fetch user information for all specialists
+        if specialist_ids:
+            users_dict = ticket_service.fetch_users_by_ids(list(specialist_ids))
+            id_to_description = ticket_service.fetch_building_descriptions()
+
+            # Sort by specialist_id and building_id for consistent output
+            for (spec_id, building_id), count in sorted(
+                per_specialist_building.items()
+            ):
+                user = users_dict.get(spec_id, {})
+                firstname = user.get("firstname", "") or ""
+                lastname = user.get("lastname", "") or ""
+                full_name = f"{firstname} {lastname}".strip()
+
+                if not full_name:
+                    full_name = f"ID {spec_id}"
+
+                building_desc = id_to_description.get(
+                    str(building_id), str(building_id)
+                )
+                lines.append(f"• Исполнитель {full_name} ({building_desc}): {count}")
+
     return "\n\n".join(lines)
 
 

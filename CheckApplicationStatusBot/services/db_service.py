@@ -6,7 +6,7 @@ from mysql.connector import connect
 from mysql.connector import pooling
 from mysql.connector.connection import MySQLConnection
 
-
+# taken - status for active tickets
 # Load environment variables (safe if already loaded elsewhere)
 load_dotenv()
 
@@ -32,6 +32,7 @@ class MySQLTicketService:
         self.db_name: str = os.getenv("DB_NAME", "")
         self.tickets_table: str = os.getenv("TICKETS_TABLE_NAME", "DB_TICKETS")
         self.buildings_table: str = os.getenv("BUILDINGS_TABLE_NAME", "cat_building")
+        self.users_table: str = os.getenv("USERS_TABLE_NAME", "users")
 
         # Basic validation to avoid unsafe identifiers
         if not self._is_safe_identifier(self.tickets_table):
@@ -60,15 +61,6 @@ class MySQLTicketService:
     def _get_connection(self) -> MySQLConnection:
         return self.pool.get_connection()
 
-    def fetch_all_tickets(
-        self, limit: int = 100, offset: int = 0
-    ) -> List[Dict[str, Any]]:
-        query = (
-            f"SELECT * FROM {self.tickets_table} ORDER BY id DESC LIMIT %s OFFSET %s"
-        )
-        params: Tuple[int, int] = (limit, offset)
-        return self._execute_query(query, params)
-
     def fetch_building_descriptions(self) -> Dict[str, str]:
         """
         Return mapping of building id (as string) -> description from cat_building table.
@@ -85,11 +77,6 @@ class MySQLTicketService:
                 id_to_desc[str(bid)] = str(desc) if desc is not None else str(bid)
         return id_to_desc
 
-    def fetch_ticket_by_id(self, ticket_id: Any) -> Optional[Dict[str, Any]]:
-        query = f"SELECT * FROM {self.tickets_table} WHERE id = %s"
-        rows = self._execute_query(query, (ticket_id,))
-        return rows[0] if rows else None
-
     def fetch_tickets_by_status(
         self,
         status: str = "new",
@@ -103,6 +90,33 @@ class MySQLTicketService:
         )
         params: Tuple[Any, ...] = (status, department_id, limit, offset)
         return self._execute_query(query, params)
+
+    def fetch_users_by_id(
+        self,
+        user_id: int,
+    ) -> Dict[str, Any]:
+        query = f"SELECT * FROM {self.users_table} WHERE id = %s"
+        params: Tuple[Any, ...] = (user_id,)
+        rows = self._execute_query(query, params)
+        return rows[0] if rows else {}
+
+    def fetch_users_by_ids(
+        self,
+        user_ids: List[int],
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Fetch multiple users by their IDs.
+        Returns a dictionary mapping user_id -> user data.
+        """
+        if not user_ids:
+            return {}
+        # Create placeholders for IN clause
+        placeholders = ",".join(["%s"] * len(user_ids))
+        query = f"SELECT * FROM {self.users_table} WHERE id IN ({placeholders})"
+        params: Tuple[Any, ...] = tuple(user_ids)
+        rows = self._execute_query(query, params)
+        # Return as dict mapping id -> user data
+        return {row.get("id"): row for row in rows if row.get("id") is not None}
 
     def _execute_query(
         self, query: str, params: Tuple[Any, ...]
