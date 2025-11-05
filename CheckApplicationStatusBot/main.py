@@ -128,29 +128,40 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def compose_new_tickets_summary() -> str:
+    """
+    Compose a summary of tickets (counts only, no individual ticket details).
+    Returns summary grouped by building and specialist.
+    """
     global ticket_service
     if ticket_service is None:
         ticket_service = get_ticket_service()
 
-    # Fetch new tickets
+    # Fetch available tickets (unassigned/new tickets ready to be worked on)
+    # Try "available" status first, fallback to "new" if "available" returns empty
     new_rows = ticket_service.fetch_tickets_by_status(
-        status="new", department_id=33, limit=1000, offset=0
+        status="available", department_id=33, limit=1000, offset=0
     )
+    # If "available" returns no results, try "new" status
+    if not new_rows:
+        new_rows = ticket_service.fetch_tickets_by_status(
+            status="new", department_id=33, limit=1000, offset=0
+        )
 
-    # Fetch taken tickets
+    # Fetch taken tickets (status="taken" means in progress)
     taken_rows = ticket_service.fetch_tickets_by_status(
         status="taken", department_id=33, limit=1000, offset=0
     )
 
     lines = []
 
-    # New tickets section
+    # New/Available tickets section - summary only (counts per building)
     if not new_rows:
         lines.append("📊 Новых заявок: 0")
     else:
         total_count = len(new_rows)
         per_building: dict[str, int] = {}
         for row in new_rows:
+            # Only count, don't include individual ticket details
             building_key = row.get("building_id") if isinstance(row, dict) else None
             if building_key is None:
                 building_key = "не указан"
@@ -210,17 +221,20 @@ def compose_new_tickets_summary() -> str:
 
 
 async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Return summary of NEW tickets and counts per building."""
+    """Return summary of tickets (counts grouped by building/specialist), not individual tickets."""
     chat = update.effective_chat
     if chat:
         track_chat_id(chat.id)
     try:
         text = compose_new_tickets_summary()
-        await update.message.reply_text(text)
+        if not text or not text.strip():
+            await update.message.reply_text("No tickets found.")
+        else:
+            await update.message.reply_text(text)
     except Exception as e:
-        logger.error(f"/tickets failed: {e}")
+        logger.error(f"/tickets failed: {e}", exc_info=True)
         await update.message.reply_text(
-            "Failed to fetch tickets. Please try again later."
+            "Failed to fetch tickets summary. Please try again later."
         )
 
 
