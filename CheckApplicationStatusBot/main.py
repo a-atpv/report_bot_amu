@@ -154,11 +154,18 @@ def compose_new_tickets_summary() -> str:
 
     lines = []
 
+    # Header
+    lines.append("📬 *Статистика заявок*")
+    lines.append("")
+    lines.append("")
+
     # New/Available tickets section - summary only (counts per building)
-    if not new_rows:
-        lines.append("📊 Новых заявок: 0")
-    else:
-        total_count = len(new_rows)
+    total_count = len(new_rows) if new_rows else 0
+    lines.append(f"📊 *Всего новых:* {total_count}")
+    lines.append("")
+    lines.append("")
+
+    if new_rows:
         per_building: dict[str, int] = {}
         for row in new_rows:
             # Only count, don't include individual ticket details
@@ -167,17 +174,33 @@ def compose_new_tickets_summary() -> str:
                 building_key = "не указан"
             building_key = str(building_key)
             per_building[building_key] = per_building.get(building_key, 0) + 1
+
         id_to_description = ticket_service.fetch_building_descriptions()
-        lines.append(f"📊 Новых заявок: {total_count}")
-        lines.append("🏢 новых заявок по адресам:")
-        for b in sorted(per_building.keys()):
-            readable = id_to_description.get(b, b)
-            lines.append(f"• корпус {readable}: {per_building[b]} 📨")
+        lines.append("🏠 *По адресам:*")
+        lines.append("")
+
+        # Separate "Другое" (unassigned/unknown) from regular buildings
+        other_count = per_building.get("не указан", 0)
+        regular_buildings = {k: v for k, v in per_building.items() if k != "не указан"}
+
+        # Sort regular buildings by description
+        sorted_buildings = sorted(
+            regular_buildings.items(), key=lambda x: id_to_description.get(x[0], x[0])
+        )
+
+        for building_id, count in sorted_buildings:
+            readable = id_to_description.get(building_id, building_id)
+            lines.append(f"🏢 {readable} — *{count}*")
+
+        if other_count > 0:
+            lines.append(f"🏗 Другое — *{other_count}*")
 
     # Taken tickets section
     if taken_rows:
-        lines.append("-------------------------------")
-        lines.append("заявок в работе:")
+        lines.append("")
+        lines.append("")
+        lines.append("⚙️ *В работе:*")
+        lines.append("")
 
         # Group taken tickets by specialist_id and building_id
         per_specialist_building: dict[tuple, int] = {}
@@ -215,9 +238,9 @@ def compose_new_tickets_summary() -> str:
                 building_desc = id_to_description.get(
                     str(building_id), str(building_id)
                 )
-                lines.append(f"• Исполнитель {full_name} ({building_desc}): {count}")
+                lines.append(f"👷‍♂️ {full_name} — ({building_desc}) — *{count}*")
 
-    return "\n\n".join(lines)
+    return "\n".join(lines)
 
 
 async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -230,7 +253,7 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not text or not text.strip():
             await update.message.reply_text("No tickets found.")
         else:
-            await update.message.reply_text(text)
+            await update.message.reply_text(text, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"/tickets failed: {e}", exc_info=True)
         await update.message.reply_text(
@@ -318,7 +341,9 @@ def main() -> None:
                 tracked_chat_ids.copy()
             ):  # Use copy to avoid modification during iteration
                 try:
-                    await context.bot.send_message(chat_id=chat_id, text=text)
+                    await context.bot.send_message(
+                        chat_id=chat_id, text=text, parse_mode="Markdown"
+                    )
                     successful_sends += 1
                     logger.info(
                         f"Successfully sent scheduled message to chat {chat_id}"
