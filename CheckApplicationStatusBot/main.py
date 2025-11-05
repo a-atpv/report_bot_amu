@@ -156,14 +156,9 @@ def compose_new_tickets_summary() -> str:
 
     # Header
     lines.append("📬 *Статистика заявок*")
-    lines.append("")
-    lines.append("")
 
-    # New/Available tickets section - summary only (counts per building)
     total_count = len(new_rows) if new_rows else 0
     lines.append(f"📊 *Всего новых:* {total_count}")
-    lines.append("")
-    lines.append("")
 
     if new_rows:
         per_building: dict[str, int] = {}
