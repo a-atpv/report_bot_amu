@@ -38,7 +38,7 @@ try:
     ASTANA_TZ = ZoneInfo("Asia/Almaty")  # Astana time zone
 except Exception:
     # Fallback to fixed UTC+6 (Almaty/Astana) instead of UTC to keep local schedule
-    ASTANA_TZ = datetime.timezone(datetime.timedelta(hours=6), name="UTC+06")
+    ASTANA_TZ = datetime.timezone(datetime.timedelta(hours=5), name="UTC+05")
     logger = logging.getLogger(__name__)
     logger.warning("Falling back to fixed UTC+06 timezone; could not load Asia/Almaty")
 
@@ -148,33 +148,56 @@ def main() -> None:
             logger.info(f"Executing scheduled send at {now_astana}")
             text = compose_new_tickets_summary()
             await context.bot.send_message(chat_id=ANNOUNCE_CHAT_ID, text=text)
+            logger.info(
+                f"Successfully sent scheduled message to chat {ANNOUNCE_CHAT_ID}"
+            )
         except Exception as e:
-            logger.error(f"Scheduled send failed: {e}")
+            logger.error(f"Scheduled send failed: {e}", exc_info=True)
 
     times = [
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(17, 15, tzinfo=ASTANA_TZ),
+        datetime.time(9, 10, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
+
+    # Check if job_queue is available
     if application.job_queue is None:
-        logger.warning(
-            "JobQueue is not available. Install PTB with job-queue extra or APScheduler to enable scheduled jobs."
+        logger.error(
+            "JobQueue is not available. Install PTB with job-queue extra: "
+            "pip install 'python-telegram-bot[job-queue]'"
         )
     else:
+        logger.info(f"JobQueue is available. Scheduling {len(times)} daily jobs...")
         for idx, t in enumerate(times):
-            logger.info(
-                f"Scheduling job send_new_tickets_{idx} for {t.strftime('%H:%M')} {t.tzname()}"
-            )
-            application.job_queue.run_daily(
-                send_new_tickets_job,
-                time=t,
-                name=f"send_new_tickets_{idx}",
-            )
+            try:
+                logger.info(
+                    f"Scheduling job 'send_new_tickets_{idx}' for {t.strftime('%H:%M')} {t.tzname()}"
+                )
+                application.job_queue.run_daily(
+                    send_new_tickets_job,
+                    time=t,
+                    name=f"send_new_tickets_{idx}",
+                )
+                logger.info(f"Successfully scheduled job 'send_new_tickets_{idx}'")
+            except Exception as e:
+                logger.error(
+                    f"Failed to schedule job 'send_new_tickets_{idx}': {e}",
+                    exc_info=True,
+                )
 
     # Start the bot with error handling
     logger.info("Bot is starting...")
+    logger.info(f"ANNOUNCE_CHAT_ID: {ANNOUNCE_CHAT_ID}")
+    logger.info(f"Timezone: {ASTANA_TZ}")
+
+    # Verify job queue before starting
+    if application.job_queue is not None:
+        logger.info("Job queue is ready. Jobs should run at scheduled times.")
+    else:
+        logger.error("Job queue is NOT available. Scheduled messages will not work!")
+
     try:
         application.run_polling(
             allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
