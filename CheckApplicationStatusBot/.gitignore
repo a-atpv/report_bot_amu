@@ -41,3 +41,6 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Runtime data
+chat_ids.json
+

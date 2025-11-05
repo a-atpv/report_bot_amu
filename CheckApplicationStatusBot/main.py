@@ -1,7 +1,9 @@
 import os
+import json
 import logging
 import sys
 import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telegram import Update
@@ -9,10 +11,11 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    ChatMemberHandler,
     filters,
     ContextTypes,
 )
-from telegram.error import TimedOut, NetworkError
+from telegram.error import TimedOut, NetworkError, TelegramError
 from services.db_service import get_ticket_service
 
 # Load environment variables from .env file
@@ -34,6 +37,52 @@ if not BOT_TOKEN:
 ticket_service = get_ticket_service()
 ANNOUNCE_CHAT_ID_RAW = os.getenv("ANNOUNCE_CHAT_ID")
 ANNOUNCE_CHAT_ID = int(ANNOUNCE_CHAT_ID_RAW) if ANNOUNCE_CHAT_ID_RAW else None
+
+# File to store tracked chat IDs
+CHAT_IDS_FILE = Path("chat_ids.json")
+
+
+def load_chat_ids() -> set[int]:
+    """Load tracked chat IDs from file."""
+    if CHAT_IDS_FILE.exists():
+        try:
+            with open(CHAT_IDS_FILE, "r") as f:
+                data = json.load(f)
+                return set(data.get("chat_ids", []))
+        except Exception as e:
+            logger.error(f"Failed to load chat IDs: {e}")
+            return set()
+    return set()
+
+
+def save_chat_ids(chat_ids: set[int]) -> None:
+    """Save tracked chat IDs to file."""
+    try:
+        with open(CHAT_IDS_FILE, "w") as f:
+            json.dump({"chat_ids": list(chat_ids)}, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save chat IDs: {e}")
+
+
+# Global set to track active chat IDs
+tracked_chat_ids = load_chat_ids()
+if tracked_chat_ids:
+    logger.info(f"Loaded {len(tracked_chat_ids)} tracked chat IDs from file")
+if ANNOUNCE_CHAT_ID and ANNOUNCE_CHAT_ID not in tracked_chat_ids:
+    tracked_chat_ids.add(ANNOUNCE_CHAT_ID)
+    save_chat_ids(tracked_chat_ids)
+    logger.info(f"Added ANNOUNCE_CHAT_ID {ANNOUNCE_CHAT_ID} to tracked chats")
+
+
+def track_chat_id(chat_id: int) -> None:
+    """Track a chat ID if not already tracked."""
+    global tracked_chat_ids
+    if chat_id not in tracked_chat_ids:
+        tracked_chat_ids.add(chat_id)
+        save_chat_ids(tracked_chat_ids)
+        logger.info(f"Added new chat ID {chat_id} to tracked chats")
+
+
 try:
     ASTANA_TZ = ZoneInfo("Asia/Almaty")  # Astana time zone
 except Exception:
@@ -46,6 +95,9 @@ except Exception:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
     await update.message.reply_text(
         f"Hello {user.first_name}! 👋\n\n"
         "Welcome to the bot! Use /help to see available commands."
@@ -54,6 +106,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
     help_text = """
 Available commands:
 /start - Start the bot
@@ -66,6 +121,9 @@ Available commands:
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send status information."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
     await update.message.reply_text("Bot is running! ✅")
 
 
@@ -99,6 +157,9 @@ def compose_new_tickets_summary() -> str:
 
 async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return summary of NEW tickets and counts per building."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
     try:
         text = compose_new_tickets_summary()
         await update.message.reply_text(text)
@@ -109,9 +170,31 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+async def track_chat_from_update(update: Update) -> None:
+    """Helper function to track chat ID from any update."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
+
+
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
-    await update.message.reply_text(update.message.text)
+    await track_chat_from_update(update)
+    if update.message and update.message.text:
+        await update.message.reply_text(update.message.text)
+
+
+async def chat_member_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle chat member updates (e.g., when bot is added to a group)."""
+    await track_chat_from_update(update)
+    if update.chat_member:
+        new_status = update.chat_member.new_chat_member.status
+        if new_status in ["member", "administrator"]:
+            logger.info(
+                f"Bot was added to chat {update.effective_chat.id} with status: {new_status}"
+            )
 
 
 def main() -> None:
@@ -133,26 +216,70 @@ def main() -> None:
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("tickets", tickets))
 
+    # Track chats when bot member status changes (e.g., added to groups)
+    application.add_handler(
+        ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER)
+    )
+
     # Echo handler - responds to all text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     # Schedule daily announcements of new tickets (Astana time)
     async def send_new_tickets_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
-            if ANNOUNCE_CHAT_ID is None:
-                logger.warning("ANNOUNCE_CHAT_ID is not set; skipping scheduled send.")
-                return
             now_astana = datetime.datetime.now(ASTANA_TZ).strftime(
                 "%Y-%m-%d %H:%M:%S %Z"
             )
             logger.info(f"Executing scheduled send at {now_astana}")
+
+            # Reload chat IDs from file in case they were updated
+            global tracked_chat_ids
+            tracked_chat_ids = load_chat_ids()
+
+            if not tracked_chat_ids:
+                logger.warning("No tracked chat IDs found. Skipping scheduled send.")
+                return
+
             text = compose_new_tickets_summary()
-            await context.bot.send_message(chat_id=ANNOUNCE_CHAT_ID, text=text)
+            successful_sends = 0
+            failed_sends = 0
+
+            for (
+                chat_id
+            ) in (
+                tracked_chat_ids.copy()
+            ):  # Use copy to avoid modification during iteration
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=text)
+                    successful_sends += 1
+                    logger.info(
+                        f"Successfully sent scheduled message to chat {chat_id}"
+                    )
+                except TelegramError as e:
+                    failed_sends += 1
+                    error_msg = str(e).lower()
+                    # Remove chat ID if bot was removed or chat doesn't exist
+                    if (
+                        "chat not found" in error_msg
+                        or "bot was blocked" in error_msg
+                        or "unauthorized" in error_msg
+                    ):
+                        tracked_chat_ids.discard(chat_id)
+                        save_chat_ids(tracked_chat_ids)
+                        logger.warning(
+                            f"Removed chat {chat_id} from tracked chats: {e}"
+                        )
+                    else:
+                        logger.error(f"Failed to send to chat {chat_id}: {e}")
+                except Exception as e:
+                    failed_sends += 1
+                    logger.error(f"Unexpected error sending to chat {chat_id}: {e}")
+
             logger.info(
-                f"Successfully sent scheduled message to chat {ANNOUNCE_CHAT_ID}"
+                f"Scheduled send completed: {successful_sends} successful, {failed_sends} failed out of {len(tracked_chat_ids)} total chats"
             )
         except Exception as e:
-            logger.error(f"Scheduled send failed: {e}", exc_info=True)
+            logger.error(f"Scheduled send job failed: {e}", exc_info=True)
 
     times = [
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
@@ -190,6 +317,7 @@ def main() -> None:
     # Start the bot with error handling
     logger.info("Bot is starting...")
     logger.info(f"ANNOUNCE_CHAT_ID: {ANNOUNCE_CHAT_ID}")
+    logger.info(f"Tracked chat IDs: {len(tracked_chat_ids)} chats")
     logger.info(f"Timezone: {ASTANA_TZ}")
 
     # Verify job queue before starting
