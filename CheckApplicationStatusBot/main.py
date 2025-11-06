@@ -163,9 +163,9 @@ def compose_new_tickets_summary() -> str:
 
     if new_rows:
         per_building: dict[str, int] = {}
-        for row in new_rows:
+        for ticket in new_rows:
             # Only count, don't include individual ticket details
-            building_key = row.get("building_id") if isinstance(row, dict) else None
+            building_key = ticket.building_id
             if building_key is None:
                 building_key = "не указан"
             building_key = str(building_key)
@@ -202,9 +202,9 @@ def compose_new_tickets_summary() -> str:
         per_specialist_building: dict[tuple, int] = {}
         specialist_ids = set()
 
-        for row in taken_rows:
-            specialist_id = row.get("specialist_id")
-            building_id = row.get("building_id")
+        for ticket in taken_rows:
+            specialist_id = ticket.specialist_id
+            building_id = ticket.building_id
 
             if specialist_id is None:
                 continue
@@ -223,13 +223,8 @@ def compose_new_tickets_summary() -> str:
             for (spec_id, building_id), count in sorted(
                 per_specialist_building.items()
             ):
-                user = users_dict.get(spec_id, {})
-                firstname = user.get("firstname", "") or ""
-                lastname = user.get("lastname", "") or ""
-                full_name = f"{firstname} {lastname}".strip()
-
-                if not full_name:
-                    full_name = f"ID {spec_id}"
+                user = users_dict.get(spec_id)
+                full_name = user.full_name if user else f"ID {spec_id}"
 
                 building_desc = id_to_description.get(
                     str(building_id), str(building_id)
@@ -258,43 +253,28 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def compose_new_tickets_list() -> str:
-    """
-    Compose a detailed list of all new tickets in department 33.
-    Returns formatted message with all ticket details.
-    """
+
     global ticket_service
     if ticket_service is None:
         ticket_service = get_ticket_service()
 
-    # Fetch available tickets (unassigned/new tickets ready to be worked on)
-    # Try "available" status first, fallback to "new" if "available" returns empty
     new_rows = ticket_service.fetch_tickets_by_status(
-        status="available", department_id=33, limit=1000, offset=0
+        status="new", department_id=33, limit=1000, offset=0
     )
-    # If "available" returns no results, try "new" status
-    if not new_rows:
-        new_rows = ticket_service.fetch_tickets_by_status(
-            status="new", department_id=33, limit=1000, offset=0
-        )
 
     if not new_rows:
         return "всего новых заявок: 0"
 
-    # Collect all user IDs (for applicants and specialists)
     user_ids = set()
-    specialist_ids = set()
 
-    for row in new_rows:
-        user_id = row.get("user_id")
-        specialist_id = row.get("specialist_id")
+    for ticket in new_rows:
+        user_id = ticket.user_id
+        specialist_id = ticket.specialist_id
 
         if user_id is not None:
             user_ids.add(user_id)
-        if specialist_id is not None:
-            specialist_ids.add(specialist_id)
 
-    # Fetch all users and buildings in batch
-    users_dict = ticket_service.fetch_users_by_ids(list(user_ids | specialist_ids))
+    users_dict = ticket_service.fetch_users_by_ids(list(user_ids))
     buildings_dict = ticket_service.fetch_building_descriptions()
 
     lines = []
@@ -302,30 +282,34 @@ def compose_new_tickets_list() -> str:
     lines.append("")
 
     # Format each ticket
-    for row in new_rows:
-        ticket_id = row.get("id", "N/A")
-        user_id = row.get("user_id")
-        specialist_id = row.get("specialist_id")
-        building_id = row.get("building_id")
-        description = row.get("description", "не указано")
-        cabinet = row.get("cabinet", "не указан")
+    for ticket in new_rows:
+        ticket_id = ticket.id
+        user_id = ticket.user_id
+        building_id = ticket.building_id
+        description = ticket.description or "не указано"
+        cabinet = ticket.cabinet or "не указан"
 
         lines.append(f"Заявка №{ticket_id}")
         lines.append("")
 
         # Get applicant name
         if user_id:
-            user = users_dict.get(user_id, {})
-            firstname = user.get("firstname", "") or ""
-            lastname = user.get("lastname", "") or ""
-            applicant_name = f"{firstname} {lastname}".strip()
-            if not applicant_name:
+            user = users_dict.get(user_id)
+            if user:
+                applicant_name = user.full_name
+                aplicant_phone = user.phone or ""
+            else:
                 applicant_name = f"ID {user_id}"
+                aplicant_phone = ""
         else:
             applicant_name = "не указан"
+            aplicant_phone = ""
+
+        lines.append(f"Категория: {applicant_name}")
+        lines.append("Подкатегория: {category_name}")
 
         lines.append(f"Заявитель: {applicant_name}")
-
+        lines.append(f"Контакты: {aplicant_phone}")
         # Get description
         lines.append(f"Описание: {description}")
 
@@ -335,22 +319,7 @@ def compose_new_tickets_list() -> str:
         else:
             building_name = "не указан"
         lines.append(f"корпус: {building_name}")
-
-        # Get cabinet
         lines.append(f"Кабинет: {cabinet}")
-
-        # Get specialist name
-        if specialist_id:
-            specialist = users_dict.get(specialist_id, {})
-            spec_firstname = specialist.get("firstname", "") or ""
-            spec_lastname = specialist.get("lastname", "") or ""
-            specialist_name = f"{spec_firstname} {spec_lastname}".strip()
-            if not specialist_name:
-                specialist_name = f"ID {specialist_id}"
-        else:
-            specialist_name = "не назначен"
-
-        lines.append(f"Специалист: {specialist_name}")
         lines.append("")
 
     return "\n".join(lines)

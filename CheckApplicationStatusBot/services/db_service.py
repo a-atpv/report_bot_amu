@@ -6,6 +6,8 @@ from mysql.connector import connect
 from mysql.connector import pooling
 from mysql.connector.connection import MySQLConnection
 
+from models import Ticket, User, Building
+
 # taken - status for active tickets
 # Load environment variables (safe if already loaded elsewhere)
 load_dotenv()
@@ -83,30 +85,31 @@ class MySQLTicketService:
         department_id: int = 33,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Ticket]:
         query = (
             f"SELECT * FROM {self.tickets_table} WHERE `status` = %s AND department_id = %s"
             " ORDER BY id DESC LIMIT %s OFFSET %s"
         )
         params: Tuple[Any, ...] = (status, department_id, limit, offset)
-        return self._execute_query(query, params)
+        rows = self._execute_query(query, params)
+        return [Ticket.from_dict(row) for row in rows]
 
     def fetch_users_by_id(
         self,
         user_id: int,
-    ) -> Dict[str, Any]:
+    ) -> Optional[User]:
         query = f"SELECT * FROM {self.users_table} WHERE id = %s"
         params: Tuple[Any, ...] = (user_id,)
         rows = self._execute_query(query, params)
-        return rows[0] if rows else {}
+        return User.from_dict(rows[0]) if rows else None
 
     def fetch_users_by_ids(
         self,
         user_ids: List[int],
-    ) -> Dict[int, Dict[str, Any]]:
+    ) -> Dict[int, User]:
         """
         Fetch multiple users by their IDs.
-        Returns a dictionary mapping user_id -> user data.
+        Returns a dictionary mapping user_id -> User object.
         """
         if not user_ids:
             return {}
@@ -115,8 +118,12 @@ class MySQLTicketService:
         query = f"SELECT * FROM {self.users_table} WHERE id IN ({placeholders})"
         params: Tuple[Any, ...] = tuple(user_ids)
         rows = self._execute_query(query, params)
-        # Return as dict mapping id -> user data
-        return {row.get("id"): row for row in rows if row.get("id") is not None}
+        # Return as dict mapping id -> User object
+        return {
+            row.get("id"): User.from_dict(row)
+            for row in rows
+            if row.get("id") is not None
+        }
 
     def _execute_query(
         self, query: str, params: Tuple[Any, ...]
