@@ -6,12 +6,19 @@ import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     ChatMemberHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
 )
@@ -100,7 +107,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         track_chat_id(chat.id)
     await update.message.reply_text(
         f"Hello {user.first_name}! 👋\n\n"
-        "Welcome to the bot! Use /help to see available commands."
+        "Welcome to the bot! Use /help to see available commands.",
+        reply_markup=get_main_reply_keyboard(),
+    )
+    # Also show inline keyboard for callback-based actions
+    await update.message.reply_text(
+        "Быстрые действия:", reply_markup=get_main_inline_keyboard()
     )
 
 
@@ -117,7 +129,31 @@ Available commands:
 /tickets - Выжимка по новым заявкам (как в расписании)
 /new - Список всех новых заявок департамента 33
     """
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(help_text, reply_markup=get_main_reply_keyboard())
+
+
+def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Bottom reply keyboard with three quick-action buttons."""
+    keyboard = [
+        [
+            KeyboardButton(text="Новые"),
+            KeyboardButton(text="В работе"),
+            KeyboardButton(text="Статус"),
+        ]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def get_main_inline_keyboard() -> InlineKeyboardMarkup:
+    """Inline keyboard with callback-based actions."""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="Новые", callback_data="menu:new"),
+            InlineKeyboardButton(text="В работе", callback_data="menu:taken"),
+            InlineKeyboardButton(text="Статус", callback_data="menu:status"),
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -505,6 +541,24 @@ async def taken_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
+async def menu_buttons_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+
+    await track_chat_from_update(update)
+    text = update.message.text or ""
+    if text == "Новые":
+        await new_command(update, context)
+    elif text == "В работе":
+        await taken_command(update, context)
+    elif text == "Статус":
+        # Map to tickets summary (alias requested as /ticket)
+        await tickets(update, context)
+    else:
+        # Fallback to echo to preserve previous behavior
+        await echo(update, context)
+
+
 async def track_chat_from_update(update: Update) -> None:
     """Helper function to track chat ID from any update."""
     chat = update.effective_chat
@@ -517,6 +571,61 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await track_chat_from_update(update)
     if update.message and update.message.text:
         await update.message.reply_text(update.message.text)
+
+
+async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline keyboard callback queries for the main menu."""
+    query = update.callback_query
+    if not query:
+        return
+    await track_chat_from_update(update)
+    await query.answer()
+    data = (query.data or "").strip()
+
+    if data == "menu:new":
+        try:
+            text = compose_new_tickets_list()
+            msg_text = text if text and text.strip() else "всего новых заявок: 0"
+            await query.edit_message_text(
+                text=msg_text,
+                parse_mode="HTML",
+                reply_markup=get_main_inline_keyboard(),
+            )
+        except Exception:
+            await query.edit_message_text(
+                text="Не удалось получить список новых заявок. Попробуйте позже.",
+                reply_markup=get_main_inline_keyboard(),
+            )
+    elif data == "menu:taken":
+        try:
+            text = compose_taken_tickets_list()
+            msg_text = text if text and text.strip() else "всего заявок в работе: 0"
+            await query.edit_message_text(
+                text=msg_text,
+                parse_mode="HTML",
+                reply_markup=get_main_inline_keyboard(),
+            )
+        except Exception:
+            await query.edit_message_text(
+                text="Не удалось получить список заявок в работе. Попробуйте позже.",
+                reply_markup=get_main_inline_keyboard(),
+            )
+    elif data == "menu:status":
+        try:
+            text = compose_new_tickets_summary()
+            msg_text = text if text and text.strip() else "No tickets found."
+            await query.edit_message_text(
+                text=msg_text,
+                parse_mode="Markdown",
+                reply_markup=get_main_inline_keyboard(),
+            )
+        except Exception:
+            await query.edit_message_text(
+                text="Failed to fetch tickets summary. Please try again later.",
+                reply_markup=get_main_inline_keyboard(),
+            )
+    else:
+        await query.edit_message_reply_markup(reply_markup=get_main_inline_keyboard())
 
 
 async def chat_member_handler(
@@ -550,6 +659,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("tickets", tickets))
+    application.add_handler(CommandHandler("ticket", tickets))  # alias
     application.add_handler(CommandHandler("new", new_command))
     application.add_handler(CommandHandler("taken", taken_command))
 
@@ -558,7 +668,18 @@ def main() -> None:
         ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER)
     )
 
-    # Echo handler - responds to all text messages
+    # Route our bottom buttons first, then generic echo
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT
+            & ~filters.COMMAND
+            & (filters.Regex("(?i)^(Новые|В работе|Статус)$")),
+            menu_buttons_router,
+        )
+    )
+    # Handle inline keyboard callbacks for main menu
+    application.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^menu:"))
+    # Echo handler - responds to all other text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     # Schedule daily announcements of new tickets (Astana time)
