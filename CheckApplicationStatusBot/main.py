@@ -269,7 +269,6 @@ def compose_new_tickets_list() -> str:
 
     for ticket in new_rows:
         user_id = ticket.user_id
-        specialist_id = ticket.specialist_id
 
         if user_id is not None:
             user_ids.add(user_id)
@@ -277,49 +276,80 @@ def compose_new_tickets_list() -> str:
     users_dict = ticket_service.fetch_users_by_ids(list(user_ids))
     buildings_dict = ticket_service.fetch_building_descriptions()
 
+    # Fetch categories and subcategories for department 33
+    categories = ticket_service.fetch_categories_by_department_id(department_id=33)
+    categories_dict = {cat.id: cat.name_ru or f"ID {cat.id}" for cat in categories}
+
+    # Fetch all subcategories for all categories
+    subcategories_dict = {}
+    for category in categories:
+        subcategories = ticket_service.fetch_subcategories_by_category_id(category.id)
+        for subcat in subcategories:
+            subcategories_dict[subcat.id] = subcat.name_ru or f"ID {subcat.id}"
+
+    def esc(value: str) -> str:
+        s = str(value)
+        s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return s
+
     lines = []
     lines.append(f"всего новых заявок: {len(new_rows)}")
     lines.append("")
 
-    # Format each ticket
+    # Format each ticket as a quoted block
     for ticket in new_rows:
         ticket_id = ticket.id
         user_id = ticket.user_id
         building_id = ticket.building_id
+        phone = ticket.title or ""
         description = ticket.description or "не указано"
         cabinet = ticket.cabinet or "не указан"
-
-        lines.append(f"Заявка №{ticket_id}")
-        lines.append("")
 
         # Get applicant name
         if user_id:
             user = users_dict.get(user_id)
             if user:
                 applicant_name = user.full_name
-                aplicant_phone = user.phone or ""
             else:
                 applicant_name = f"ID {user_id}"
-                aplicant_phone = ""
         else:
             applicant_name = "не указан"
-            aplicant_phone = ""
 
-        lines.append(f"Категория: {applicant_name}")
-        lines.append("Подкатегория: {category_name}")
+        # Get category name
+        if ticket.category_id:
+            category_name = categories_dict.get(
+                ticket.category_id, f"ID {ticket.category_id}"
+            )
+        else:
+            category_name = "не указана"
 
-        lines.append(f"Заявитель: {applicant_name}")
-        lines.append(f"Контакты: {aplicant_phone}")
-        # Get description
-        lines.append(f"Описание: {description}")
+        # Get subcategory name
+        if ticket.subcategory_id:
+            subcategory_name = subcategories_dict.get(
+                ticket.subcategory_id, f"ID {ticket.subcategory_id}"
+            )
+        else:
+            subcategory_name = "не указана"
 
         # Get building name
         if building_id:
             building_name = buildings_dict.get(str(building_id), str(building_id))
         else:
             building_name = "не указан"
-        lines.append(f"корпус: {building_name}")
-        lines.append(f"Кабинет: {cabinet}")
+
+        ticket_lines = [
+            f"Заявка №{esc(ticket_id)}",
+            f"Заявитель: {esc(applicant_name)}",
+            f"Категория: {esc(category_name)}",
+            f"Подкатегория: {esc(subcategory_name)}",
+            f"Контакты: {esc(phone)}",
+            f"Описание: {esc(description)}",
+            f"корпус: {esc(building_name)}",
+            f"Кабинет: {esc(cabinet)}",
+        ]
+
+        # Wrap each ticket into HTML blockquote for Telegram
+        lines.append("<blockquote>" + "\n".join(ticket_lines) + "</blockquote>")
         lines.append("")
 
     return "\n".join(lines)
@@ -335,7 +365,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not text or not text.strip():
             await update.message.reply_text("всего новых заявок: 0")
         else:
-            await update.message.reply_text(text)
+            await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"/new failed: {e}", exc_info=True)
         await update.message.reply_text(

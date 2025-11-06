@@ -6,7 +6,7 @@ from mysql.connector import connect
 from mysql.connector import pooling
 from mysql.connector.connection import MySQLConnection
 
-from models import Ticket, User, Building
+from models import Ticket, User, Building, Category, SubCategory
 
 # taken - status for active tickets
 # Load environment variables (safe if already loaded elsewhere)
@@ -14,17 +14,6 @@ load_dotenv()
 
 
 class MySQLTicketService:
-    """
-    Service for retrieving data from a MySQL tickets table.
-
-    Expects the following environment variables:
-      - DB_HOST
-      - DB_PORT
-      - DB_USER
-      - DB_PASSWORD
-      - DB_NAME
-      - TICKETS_TABLE_NAME (optional, defaults to DB_TICKETS)
-    """
 
     def __init__(self, pool_name: str = "tickets_pool", pool_size: int = 5) -> None:
         self.db_host: str = os.getenv("DB_HOST", "localhost")
@@ -35,6 +24,12 @@ class MySQLTicketService:
         self.tickets_table: str = os.getenv("TICKETS_TABLE_NAME", "DB_TICKETS")
         self.buildings_table: str = os.getenv("BUILDINGS_TABLE_NAME", "cat_building")
         self.users_table: str = os.getenv("USERS_TABLE_NAME", "users")
+        self.categories_table: str = os.getenv(
+            "CATEGORIES_TABLE_NAME", "helpdesk_categories"
+        )
+        self.subcategories_table: str = os.getenv(
+            "SUBCATEGORIES_TABLE_NAME", "helpdesk_subcategories"
+        )
 
         # Basic validation to avoid unsafe identifiers
         if not self._is_safe_identifier(self.tickets_table):
@@ -44,6 +39,14 @@ class MySQLTicketService:
         if not self._is_safe_identifier(self.buildings_table):
             raise ValueError(
                 "BUILDINGS_TABLE_NAME contains invalid characters. Allowed: letters, digits, underscore."
+            )
+        if not self._is_safe_identifier(self.categories_table):
+            raise ValueError(
+                "CATEGORIES_TABLE_NAME contains invalid characters. Allowed: letters, digits, underscore."
+            )
+        if not self._is_safe_identifier(self.subcategories_table):
+            raise ValueError(
+                "SUBCATEGORIES_TABLE_NAME contains invalid characters. Allowed: letters, digits, underscore."
             )
 
         if not self.db_name:
@@ -74,7 +77,7 @@ class MySQLTicketService:
         for row in rows:
             bid = row.get("id")
             # Prefer description, then name, then id string
-            desc = row.get("description") or row.get("name")
+            desc = row.get("description")
             if bid is not None:
                 id_to_desc[str(bid)] = str(desc) if desc is not None else str(bid)
         return id_to_desc
@@ -124,6 +127,18 @@ class MySQLTicketService:
             for row in rows
             if row.get("id") is not None
         }
+
+    def fetch_categories_by_department_id(self, department_id: int) -> List[Category]:
+        query = f"SELECT * FROM {self.categories_table} WHERE department_id = %s"
+        params: Tuple[Any, ...] = (department_id,)
+        rows = self._execute_query(query, params)
+        return [Category.from_dict(row) for row in rows]
+
+    def fetch_subcategories_by_category_id(self, category_id: int) -> List[SubCategory]:
+        query = f"SELECT * FROM {self.subcategories_table} WHERE category_id = %s"
+        params: Tuple[Any, ...] = (category_id,)
+        rows = self._execute_query(query, params)
+        return [SubCategory.from_dict(row) for row in rows]
 
     def _execute_query(
         self, query: str, params: Tuple[Any, ...]

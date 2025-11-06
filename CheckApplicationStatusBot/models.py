@@ -20,9 +20,12 @@ class Ticket:
     specialist_id: Optional[int]
     building_id: Optional[int]
     description: Optional[str]
+    title: Optional[str]
     cabinet: Optional[str]
     status: str
     department_id: int
+    category_id: Optional[int]
+    subcategory_id: Optional[int]
 
     @classmethod
     def from_dict(cls, data: dict) -> "Ticket":
@@ -33,9 +36,12 @@ class Ticket:
             specialist_id=data.get("specialist_id"),
             building_id=data.get("building_id"),
             description=data.get("description"),
+            title=data.get("title"),
             cabinet=data.get("cabinet"),
             status=data.get("status"),
             department_id=data.get("department_id"),
+            category_id=data.get("category_id"),
+            subcategory_id=data.get("subcategory_id"),
         )
 
 
@@ -86,3 +92,39 @@ class Building:
     def display_name(self) -> str:
         """Returns the description if available, otherwise name, otherwise id as string."""
         return self.description or self.name or str(self.id)
+
+
+@dataclass
+class Category:
+    """Represents a category entry."""
+
+    id: int
+    department_id: int
+    name_ru: Optional[str]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Category":
+        """Create a Category instance from a dictionary (e.g., from database query)."""
+        return cls(
+            id=data.get("id"),
+            department_id=data.get("department_id"),
+            name_ru=data.get("name_ru"),
+        )
+
+
+@dataclass
+class SubCategory:
+    """Represents a sub-category entry."""
+
+    id: int
+    category_id: int
+    name_ru: Optional[str]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SubCategory":
+        """Create a SubCategory instance from a dictionary (e.g., from database query)."""
+        return cls(
+            id=data.get("id"),
+            category_id=data.get("category_id"),
+            name_ru=data.get("name_ru"),
+        )
