@@ -355,6 +355,120 @@ def compose_new_tickets_list() -> str:
     return "\n".join(lines)
 
 
+def compose_taken_tickets_list() -> str:
+
+    global ticket_service
+    if ticket_service is None:
+        ticket_service = get_ticket_service()
+
+    taken_rows = ticket_service.fetch_tickets_by_status(
+        status="taken", department_id=33, limit=1000, offset=0
+    )
+
+    if not taken_rows:
+        return "всего заявок в работе: 0"
+
+    user_ids = set()
+    specialist_ids = set()
+
+    for ticket in taken_rows:
+        user_id = ticket.user_id
+        specialist_id = ticket.specialist_id
+
+        if user_id is not None:
+            user_ids.add(user_id)
+        if specialist_id is not None:
+            specialist_ids.add(specialist_id)
+
+    users_dict = ticket_service.fetch_users_by_ids(list(user_ids | specialist_ids))
+
+    buildings_dict = ticket_service.fetch_building_descriptions()
+
+    # Fetch categories and subcategories for department 33
+    categories = ticket_service.fetch_categories_by_department_id(department_id=33)
+    categories_dict = {cat.id: cat.name_ru or f"ID {cat.id}" for cat in categories}
+
+    # Fetch all subcategories for all categories
+    subcategories_dict = {}
+    for category in categories:
+        subcategories = ticket_service.fetch_subcategories_by_category_id(category.id)
+        for subcat in subcategories:
+            subcategories_dict[subcat.id] = subcat.name_ru or f"ID {subcat.id}"
+
+    def esc(value: str) -> str:
+        s = str(value)
+        s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return s
+
+    lines = []
+    lines.append(f"всего заявок в работе: {len(taken_rows)}")
+    lines.append("")
+
+    # Format each ticket as a quoted block
+    for ticket in taken_rows:
+        ticket_id = ticket.id
+        user_id = ticket.user_id
+        specialist_id = ticket.specialist_id
+        building_id = ticket.building_id
+        phone = ticket.title or ""
+        description = ticket.description or "не указано"
+        cabinet = ticket.cabinet or "не указан"
+
+        # Get applicant name
+        if user_id:
+            user = users_dict.get(user_id)
+            if user:
+                applicant_name = user.full_name
+            else:
+                applicant_name = f"ID {user_id}"
+        else:
+            applicant_name = "не указан"
+
+        specialist_name = (
+            users_dict.get(specialist_id).full_name if specialist_id else "не указан"
+        )
+
+        # Get category name
+        if ticket.category_id:
+            category_name = categories_dict.get(
+                ticket.category_id, f"ID {ticket.category_id}"
+            )
+        else:
+            category_name = "не указана"
+
+        # Get subcategory name
+        if ticket.subcategory_id:
+            subcategory_name = subcategories_dict.get(
+                ticket.subcategory_id, f"ID {ticket.subcategory_id}"
+            )
+        else:
+            subcategory_name = "не указана"
+
+        # Get building name
+        if building_id:
+            building_name = buildings_dict.get(str(building_id), str(building_id))
+        else:
+            building_name = "не указан"
+
+        ticket_lines = [
+            f"Заявка №{esc(ticket_id)}",
+            f"Заявитель: {esc(applicant_name)}",
+            f"Категория: {esc(category_name)}",
+            f"Подкатегория: {esc(subcategory_name)}",
+            f"Контакты: {esc(phone)}",
+            f"Описание: {esc(description)}",
+            f"корпус: {esc(building_name)}",
+            f"Кабинет: {esc(cabinet)}",
+            f"Исполнитель: {esc(specialist_name)}",
+        ]
+
+        # Wrap each ticket into HTML blockquote for Telegram
+        lines.append("<blockquote>" + "\n".join(ticket_lines) + "</blockquote>")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return detailed list of all new tickets in department 33."""
     chat = update.effective_chat
@@ -370,6 +484,24 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error(f"/new failed: {e}", exc_info=True)
         await update.message.reply_text(
             "Не удалось получить список новых заявок. Попробуйте позже."
+        )
+
+
+async def taken_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return detailed list of all taken tickets in department 33."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
+    try:
+        text = compose_taken_tickets_list()
+        if not text or not text.strip():
+            await update.message.reply_text("всего заявок в работе: 0")
+        else:
+            await update.message.reply_text(text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"/taken failed: {e}", exc_info=True)
+        await update.message.reply_text(
+            "Не удалось получить список заявок в работе. Попробуйте позже."
         )
 
 
@@ -419,6 +551,7 @@ def main() -> None:
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("tickets", tickets))
     application.add_handler(CommandHandler("new", new_command))
+    application.add_handler(CommandHandler("taken", taken_command))
 
     # Track chats when bot member status changes (e.g., added to groups)
     application.add_handler(
