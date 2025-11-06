@@ -115,6 +115,7 @@ Available commands:
 /help - Show this help message
 /status - Check status
 /tickets - Выжимка по новым заявкам (как в расписании)
+/new - Список всех новых заявок департамента 33
     """
     await update.message.reply_text(help_text)
 
@@ -256,6 +257,123 @@ async def tickets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+def compose_new_tickets_list() -> str:
+    """
+    Compose a detailed list of all new tickets in department 33.
+    Returns formatted message with all ticket details.
+    """
+    global ticket_service
+    if ticket_service is None:
+        ticket_service = get_ticket_service()
+
+    # Fetch available tickets (unassigned/new tickets ready to be worked on)
+    # Try "available" status first, fallback to "new" if "available" returns empty
+    new_rows = ticket_service.fetch_tickets_by_status(
+        status="available", department_id=33, limit=1000, offset=0
+    )
+    # If "available" returns no results, try "new" status
+    if not new_rows:
+        new_rows = ticket_service.fetch_tickets_by_status(
+            status="new", department_id=33, limit=1000, offset=0
+        )
+
+    if not new_rows:
+        return "всего новых заявок: 0"
+
+    # Collect all user IDs (for applicants and specialists)
+    user_ids = set()
+    specialist_ids = set()
+
+    for row in new_rows:
+        user_id = row.get("user_id")
+        specialist_id = row.get("specialist_id")
+
+        if user_id is not None:
+            user_ids.add(user_id)
+        if specialist_id is not None:
+            specialist_ids.add(specialist_id)
+
+    # Fetch all users and buildings in batch
+    users_dict = ticket_service.fetch_users_by_ids(list(user_ids | specialist_ids))
+    buildings_dict = ticket_service.fetch_building_descriptions()
+
+    lines = []
+    lines.append(f"всего новых заявок: {len(new_rows)}")
+    lines.append("")
+
+    # Format each ticket
+    for row in new_rows:
+        ticket_id = row.get("id", "N/A")
+        user_id = row.get("user_id")
+        specialist_id = row.get("specialist_id")
+        building_id = row.get("building_id")
+        description = row.get("description", "не указано")
+        cabinet = row.get("cabinet", "не указан")
+
+        lines.append(f"Заявка №{ticket_id}")
+        lines.append("")
+
+        # Get applicant name
+        if user_id:
+            user = users_dict.get(user_id, {})
+            firstname = user.get("firstname", "") or ""
+            lastname = user.get("lastname", "") or ""
+            applicant_name = f"{firstname} {lastname}".strip()
+            if not applicant_name:
+                applicant_name = f"ID {user_id}"
+        else:
+            applicant_name = "не указан"
+
+        lines.append(f"Заявитель: {applicant_name}")
+
+        # Get description
+        lines.append(f"Описание: {description}")
+
+        # Get building name
+        if building_id:
+            building_name = buildings_dict.get(str(building_id), str(building_id))
+        else:
+            building_name = "не указан"
+        lines.append(f"корпус: {building_name}")
+
+        # Get cabinet
+        lines.append(f"Кабинет: {cabinet}")
+
+        # Get specialist name
+        if specialist_id:
+            specialist = users_dict.get(specialist_id, {})
+            spec_firstname = specialist.get("firstname", "") or ""
+            spec_lastname = specialist.get("lastname", "") or ""
+            specialist_name = f"{spec_firstname} {spec_lastname}".strip()
+            if not specialist_name:
+                specialist_name = f"ID {specialist_id}"
+        else:
+            specialist_name = "не назначен"
+
+        lines.append(f"Специалист: {specialist_name}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return detailed list of all new tickets in department 33."""
+    chat = update.effective_chat
+    if chat:
+        track_chat_id(chat.id)
+    try:
+        text = compose_new_tickets_list()
+        if not text or not text.strip():
+            await update.message.reply_text("всего новых заявок: 0")
+        else:
+            await update.message.reply_text(text)
+    except Exception as e:
+        logger.error(f"/new failed: {e}", exc_info=True)
+        await update.message.reply_text(
+            "Не удалось получить список новых заявок. Попробуйте позже."
+        )
+
+
 async def track_chat_from_update(update: Update) -> None:
     """Helper function to track chat ID from any update."""
     chat = update.effective_chat
@@ -301,6 +419,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("tickets", tickets))
+    application.add_handler(CommandHandler("new", new_command))
 
     # Track chats when bot member status changes (e.g., added to groups)
     application.add_handler(
