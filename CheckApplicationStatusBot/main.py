@@ -694,6 +694,11 @@ def main() -> None:
             )
             logger.info(f"Executing scheduled send at {now_astana}")
 
+            # Skip weekend sends
+            if datetime.datetime.now(ASTANA_TZ).weekday() >= 5:
+                logger.info("Weekend detected; skipping scheduled notifications")
+                return
+
             # Reload chat IDs from file in case they were updated
             global tracked_chat_ids
             tracked_chat_ids = load_chat_ids()
@@ -749,7 +754,6 @@ def main() -> None:
         datetime.time(8, 30, tzinfo=ASTANA_TZ),
         datetime.time(12, 0, tzinfo=ASTANA_TZ),
         datetime.time(15, 0, tzinfo=ASTANA_TZ),
-        datetime.time(9, 58, tzinfo=ASTANA_TZ),
         datetime.time(17, 25, tzinfo=ASTANA_TZ),
     ]
 
