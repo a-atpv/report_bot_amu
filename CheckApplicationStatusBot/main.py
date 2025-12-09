@@ -105,9 +105,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     if chat:
         track_chat_id(chat.id)
+    first_name = user.first_name if user and user.first_name else "гость"
+    status_text = compose_bot_status_text()
     await update.message.reply_text(
-        f"Hello {user.first_name}! 👋\n\n"
-        "Welcome to the bot! Use /help to see available commands.",
+        f"Добрый день, {first_name}! 👋\n\n{status_text}",
         reply_markup=get_main_reply_keyboard(),
     )
     # Also show inline keyboard for callback-based actions
@@ -165,7 +166,26 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     if chat:
         track_chat_id(chat.id)
-    await update.message.reply_text("Bot is running! ✅")
+    await update.message.reply_text(compose_bot_status_text())
+
+
+def compose_bot_status_text() -> str:
+    """Return short health status that we can reuse in /start and /status."""
+    global ticket_service
+
+    issues: list[str] = []
+
+    # Lazy-init the ticket service to detect obvious failures early.
+    if ticket_service is None:
+        try:
+            ticket_service = get_ticket_service()
+        except Exception:
+            issues.append("⚠️ Не удалось подключиться к сервису заявок")
+
+    if issues:
+        return "\n".join(["Статус бота:", *issues])
+
+    return "Статус бота:\n✅ Все работает штатно"
 
 
 def compose_new_tickets_summary() -> str:
@@ -774,6 +794,7 @@ def main() -> None:
                     send_new_tickets_job,
                     time=t,
                     name=f"send_new_tickets_{idx}",
+                    days=(0, 1, 2, 3, 4),  # run only on weekdays (Mon-Fri)
                 )
                 logger.info(f"Successfully scheduled job 'send_new_tickets_{idx}'")
             except Exception as e:
