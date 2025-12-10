@@ -709,9 +709,17 @@ def main() -> None:
     # Schedule daily announcements of new tickets (Astana time)
     async def send_new_tickets_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
-            now_astana = datetime.datetime.now(ASTANA_TZ).strftime(
-                "%Y-%m-%d %H:%M:%S %Z"
-            )
+            now_astana_dt = datetime.datetime.now(ASTANA_TZ)
+            # Skip weekends (Saturday=6, Sunday=7)
+            if (
+                now_astana_dt.isoweekday() >= 6
+                or now_astana_dt.isoweekday() == 3
+                or now_astana_dt.isoweekday() == 4
+            ):
+                logger.info("Scheduled send skipped: weekend (Sat/Sun/Wed/Thu)")
+                return
+
+            now_astana = now_astana_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
             logger.info(f"Executing scheduled send at {now_astana}")
 
             # Skip weekend sends
