@@ -713,8 +713,6 @@ def main() -> None:
             # Skip weekends (Saturday=6, Sunday=7)
             if (
                 now_astana_dt.isoweekday() >= 6
-                or now_astana_dt.isoweekday() == 3
-                or now_astana_dt.isoweekday() == 4
             ):
                 logger.info("Scheduled send skipped: weekend (Sat/Sun/Wed/Thu)")
                 return
