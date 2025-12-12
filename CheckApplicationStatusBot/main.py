@@ -710,20 +710,8 @@ def main() -> None:
     async def send_new_tickets_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             now_astana_dt = datetime.datetime.now(ASTANA_TZ)
-            # Skip weekends (Saturday=6, Sunday=7)
-            if (
-                now_astana_dt.isoweekday() >= 6
-            ):
-                logger.info("Scheduled send skipped: weekend (Sat/Sun/Wed/Thu)")
-                return
-
             now_astana = now_astana_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
             logger.info(f"Executing scheduled send at {now_astana}")
-
-            # Skip weekend sends
-            if datetime.datetime.now(ASTANA_TZ).weekday() >= 5:
-                logger.info("Weekend detected; skipping scheduled notifications")
-                return
 
             # Reload chat IDs from file in case they were updated
             global tracked_chat_ids
