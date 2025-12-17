@@ -788,7 +788,9 @@ def main() -> None:
                     send_new_tickets_job,
                     time=t,
                     name=f"send_new_tickets_{idx}",
-                    days=(0, 1, 2, 3, 4),  # run only on weekdays (Mon-Fri)
+                    # В PTB v20+ days выровнен с datetime.weekday():
+                    # 0 = понедельник, 6 = воскресенье. Нам нужны будни (пн–пт).
+                    days=(0, 1, 2, 3, 4),
                 )
                 logger.info(f"Successfully scheduled job 'send_new_tickets_{idx}'")
             except Exception as e:
